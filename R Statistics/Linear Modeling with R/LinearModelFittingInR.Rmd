@@ -1,0 +1,199 @@
+---
+title: "Exercise in Exploring Predictors of House Sale Prices Using a Linear Model"
+output: pdf_document
+date: '2022-07-30'
+---
+
+```{r Load the data, include = FALSE}
+## Set the working directory
+setwd("/Users/kimberlyadams/Documents/GitHub/Portfolio/R Statistics/Linear Modeling with R")
+
+## Load the ggplot2 library
+library(ggplot2)
+
+## Get current working directory
+getwd()
+
+## Housing data set cleanup
+## Prevent scientific notation
+options(scipen = 999)
+
+library(readxl) 
+
+## Load the downloaded data from file
+
+housing_data = read_excel('/Users/kimberlyadams/Documents/GitHub/Portfolio/R Statistics/Linear Modeling with R/week-7-housing.xlsx', sheet = 'Sheet2', .name_repair = 'universal')
+```
+
+### 1) Explain any transformations or modifications you made to the dataset
+
+* When importing the data, I replaced spaces with "." in the column names
+* I did not transform the data as often the transformation causes more problems. There is a potential for transforming variables such as sale price to try to normalize the data spread from a positive skew to a more normal distribution, but I did not do this.
+
+### 2) Create two models; one that will contain the variables Sale Price and Square Foot of Lot and one that will contain Sale Price and several additional predictors of your choice. Explain the basis for your additional predictor selections.
+
+Creating linear models for:
+
+* Price and lot size = how much am I paying for the land space?
+* Price and Year Built and lot size = Are older houses cheaper and bigger lots more expensive?
+
+```{r Add models}
+PriceBySqFtLot.lm = lm(Sale.Price ~ sq_ft_lot, data = housing_data)
+
+PriceBuildLotSize.lm = lm(Sale.Price ~ sq_ft_lot + year_built, data = housing_data)
+```
+
+### 3) Execute a summary() function on two variables defined in the previous step to compare the model results.
+
+```{r Summary Price by Square Foot Lot}
+summary(PriceBySqFtLot.lm)
+summary(PriceBuildLotSize.lm)
+```
+
+    a)  What are the R2 and Adjusted R2 statistics?
+
+Single model with just lot size has a R2 of 0.014 while the model with 2 explanatory variables has an adjusted R2 of 0.083.
+
+    b)  Explain what these results tell you about the overall model.
+
+The model is not very good at predicting the sale price as it explains less than 10% of the variation within the sale price data.
+
+    c)  Did the inclusion of the additional predictors help explain any large variations found in Sale Price?
+
+The model improved 8x with the addition of the year_built variable, but is still not a great model for this data as it only explains about 8% of the data.
+
+### 4) Considering the parameters of the multiple regression model you have created.
+
+    a)  What are the standardized betas for each parameter and what do the values indicate?
+
+```{r Standardized beta estimates, echo = FALSE}
+QuantPsyc::lm.beta(PriceBuildLotSize.lm)
+```
+
+The standardized beta value is an indication of the how the outcome changes (in units of standard deviations) if the predictor changes by 1 standard deviation. In other words, it gives us an indicator of the importance of the predictor.
+
+The value of year_built is 0.16 and the sq_ft_lot is 0.26 This means that the square footage of the lot is a better predictor than the year the house was built as it has a bigger influence on the Sale Price indicated by the higher beta value.
+
+### 5) Calculate the confidence intervals for the parameters in your model and explain what the results indicate.
+
+```{r Confidence intervals}
+cor.test(housing_data$Sale.Price, housing_data$year_built)
+cor.test(housing_data$Sale.Price, housing_data$sq_ft_lot)
+```
+
+The confidence interval for Sale.Price and year_built is 0.23-0.25 which gives us confidence that there is a positively linear relationship between the two variables.
+
+The confidence interval for Sale.Price and sq_ft_lot is 0.10-0.13 which also gives us confidence that there is a positively linear relationship between the two variables.
+
+Both variables give very small ranges of confidence interval which is good as it means our estimate is very likely correct as the correlation value is predicted to fall within those ranges 95% of the time.
+
+### 6) Assess the improvement of the new model compared to your original model (simple regression model) by testing whether this change is significant by performing an analysis of variance.
+
+```{r ANOVA}
+anova(PriceBySqFtLot.lm, PriceBuildLotSize.lm)
+```
+
+The F value is 956.69 and the p value is \<.001 meaning that there is a significant improvement to the model by adding the year_built variable.
+
+### 7) Perform casewise diagnostics to identify outliers and/or influential cases, storing each function's output in a dataframe assigned to a unique variable name.
+
+```{r Casewise diagnostics}
+housing_data$Residuals <- resid(PriceBuildLotSize.lm)
+housing_data$StandResiduals <- rstandard(PriceBuildLotSize.lm)
+housing_data$StudentResiduals <- rstudent(PriceBuildLotSize.lm)
+
+housing_data$Cooks <- cooks.distance(PriceBuildLotSize.lm)
+housing_data$DFBeta <- dfbeta(PriceBuildLotSize.lm)
+housing_data$DFFit <- dffits(PriceBuildLotSize.lm)
+housing_data$leverage <- hatvalues(PriceBuildLotSize.lm)
+housing_data$covarRatio <- covratio(PriceBuildLotSize.lm)
+```
+
+### 8) Calculate the standardized residuals using the appropriate command, specifying those that are +-2, storing the results of large residuals in a variable you create.
+
+```{r Large Residuals}
+housing_data$LargeResidual <- housing_data$StandResiduals > 2 | housing_data$StandResiduals < -2
+```
+
+### 9) Use the appropriate function to show the sum of large residuals.
+
+```{r Residual Sum}
+sum(housing_data$LargeResidual)
+```
+
+There are 365 large residuals out of the 12865 rows of data which is equal to roughly 3% of the data.
+
+### 10) Which specific variables have large residuals (only cases that evaluate as TRUE)?
+
+```{r Which are residuals, echo = FALSE}
+housing_data[housing_data$LargeResidual, c("Sale.Price","sq_ft_lot", "StandResiduals")]
+```
+
+### 11) Investigate further by calculating the leverage, cooks distance, and covariance ratios. Comment on all cases that are problematics.
+
+```{r Further investigations, echo = FALSE}
+    housing_data[housing_data$LargeResidual, c("Cooks","leverage", "covarRatio")]
+```
+
+Of the properties with large residuals:  
+
+* 2 of the properties come close to a Cook's distance of 1 (0.95 and 0.89) as the highest distance is 0.14.  
+* 19 properties have leverage values 2 times the average leverage value of 0.0002.  
+* 26 properties have a CVR value greater than 1.0004 = (1 + [3(2 + 1) / 12856]) and 19 have a CVR value less than 0.9996 = (1 - [3(2 + 1) / 12856]).
+
+### 12) Perform the necessary calculations to assess the assumption of independence and state if the condition is met or not.
+
+```{r Assumption of Independence}
+car::durbinWatsonTest(PriceBuildLotSize.lm)
+```
+
+The Durbin Watson test returns a value of 0.76 which is not optimal as it is less than one. This indicates that the assumption of independence is not met in this data.
+
+### 13) Perform the necessary calculations to assess the assumption of no multicollinearity and state if the condition is met or not.
+
+```{r assumption of no multicollinearity}
+library(car)
+vif(PriceBuildLotSize.lm)
+1 / vif(PriceBuildLotSize.lm)
+mean(vif(PriceBuildLotSize.lm))
+```
+
+* VIF is not greater than 10 so no worries there.
+* The average VIF is very slightly greater than 1 thus the regression may be every so slightly biased.
+* Tolerance levels are around 0.98 so no worries there either.
+* Based on these observations, we can safely conclude that there is no collinearity within the data.
+
+### 14) Visually check the assumptions related to the residuals using the plot() and hist() functions. Summarize what each graph is informing you of and if any anomalies are present.
+
+```{r Histograms, fig.show="hold", out.width="50%", echo = FALSE}
+hist(housing_data$Sale.Price, main = "Sale Price")
+boxplot(housing_data$Sale.Price, main = "Sale Price")
+
+hist(housing_data$year_built, main = "Year Built")
+boxplot(housing_data$year_built, main = "Year Built")
+
+hist(housing_data$sq_ft_lot, main = "Lot Size")
+boxplot(housing_data$sq_ft_lot, main = "Lot Size")
+```
+
+Sale.Price and sq_ft_lot both have positively skewed distributions while year_built has a negatively skewed distribution.The sq_ft_lot has the strongest skew.
+
+The skewing shown in the histograms is echoed in boxplots of each of the variables showing that there are many potential outliers at the tail ends of the data.
+
+```{r Graphs, out.width="50%", echo = FALSE}
+plot(PriceBuildLotSize.lm)
+```
+
+The first plot the Residuals vs Fitted, shows a not so random pattern indicating that the assumptions of heteroscedasticity, linearity and randomness have NOT been met. This reinforces what we found earlier that the assumption of independence was NOT met in this data.
+
+The second plot (The QQ Plot) shows that the values in the lower range do have some properties of normal distribution (based on the closeness of the data to line), but as the data value increases, the normal distribution disappears and the data points very farther from the line indicating a positive skew.
+
+In the third plot, Scale-Location, the red line is not horizontal indicating the assumption of homoscedasticity is NOT met. Also the points are bunched up in the lower x values indicating greater variance at that end of the regression.
+
+The last Residuals vs Leverage plot show there there is one data point (#8377) that has significant leverage (compared to the other data points in this set) but very little residual meaning it may have swayed the model to fit itself. Likewise towards the top of the graph point #4649 also has a high cook's distance, but has less leverage which resulted in a higher residual value as it didn't have as much sway as point 8377. Both points are influential points. Most of the data points have very high residuals meaning that they don't fit the linear model very well, but have little leverage to pull the line towards them.
+
+### 15) Overall, is this regression model unbiased? If an unbiased regression model, what does this tell us about the sample vs. the entire population model?
+
+* The VIF value was around 1 which indicates that there is very little multicollinearity bias present.  
+* If we consider points 8377 and 4649 outtliers, then they are applying some bias to the model, by pulling the linear regression towards themselves.
+* Because the data appears to be unbiased, that means that we can assume that it is representative of the population.

@@ -1,0 +1,453 @@
+---
+title: "Does Weather Impact Birdwatcher Participation and Chances of Observing a Wood Thrush? "
+author: "Kimberly Adams"
+date: 08/13/2022
+output:
+  pdf_document: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r Setup workspace, include=FALSE}
+## Prevent scientific notation
+options(scipen = 999)
+```
+
+## Introduction
+
+Birdwatching is a very popular hobby in the United States and has a significant impact to the economy.
+Birdwatchers (or birders) spend money not only on their birdwatching gear, but often also travel to see specific species and thus promote ecotourism.
+With global warming, weather patterns are shifting with seasonality changes and temperature increases along with increased severity of weather events such as hurricanes.
+This changes could both impact bird populations and the eagerness of birders to go birdwatching.
+
+In this study, I look at how different weather aspects such as precipitation, temperature, and hurricanes effect bird observations both in terms of the number of checklists that are being submitted by birders and the success rate of observing a Wood Thrush in the northern part of the state of Florida.
+
+# The Data
+
+## eBird Data
+
+My primary dataset is from eBird (eBird Basic Dataset. Version: EBD_relMay-2022. Cornell Lab of Ornithology, Ithaca, New York. May 2022.\* <https://ebird.org/data/download>).
+eBird is an online citizen science project started in 2002 by the Cornell Lab of Ornithology promoting conservation, wildlife education, and science-based studies.
+Birders from all over the world submit their checklists of sightings stating what species they saw and where and when they saw them.
+The goal of eBird data is to help scientists better track bird population trends both spatially and temporally.
+By involving the public, eBird is able to not only inspire a love of nature and sense of involvement, but at the same time collect an immense amount of data to see global bird population trends.
+Data entry from the public is reviewed by regional volunteers to promote consistency and accuracy.
+
+For my analysis, I am using a pre-prepared data set of Wood Thrush in Bird Conservation Region (BCR) 27 ("Southeastern Coastal Plains") in only the month of June of each year from 2010-2019.
+This data can be downloaded directly here: <https://github.com/cornelllabofornithology/ebird-best-practices/raw/master/data/data.zip>.
+
+![Bird Conservation Regions (BCRs)](nabci-bcr-map-terrestrial%20copy.jpg){width="222"}
+
+Note that it does still require some preparation before it can be used in R.
+
+```{r Process eBird Data, include = FALSE, eval = FALSE}
+#  Comments in this section are copied from the eBird data processing instructions which can be found here: https://cornelllabofornithology.github.io/ebird-best-practices/index.html
+
+# install.packages("remotes")
+# remotes::install_github("mstrimas/ebppackages")
+
+## Set the working directory
+setwd("/Users/kimberlyadams/Documents/GitHub/Portfolio/Weather and Wood Thrushes/AUKPractice")
+
+# set ebd path
+auk::auk_set_ebd_path("/data/ebird")
+
+library(auk)
+library(lubridate)
+library(sf)
+library(gridExtra)
+library(tidyverse)
+# resolve namespace conflicts
+select <- dplyr::select
+
+# setup data directory
+dir.create("data", showWarnings = FALSE)
+
+ebd <- auk_ebd("ebd_woothr_june_bcr27.txt", 
+               file_sampling = "ebd_checklists_june_bcr27.txt")
+
+# Next, define the filters that you want to apply to the EBD. Each field that you can filter on has an associated function. For example, we’ll filter to Wood Thrush observations with auk_species(), from BCR 27 with auk_bcr(), in June of any year with auk_date(), restrict observations to those from either Stationary or Traveling protocols with auk_protocol(), and only keep complete checklists with auk_complete() since we intend to zero-fill the data.
+
+ebd_filters <- ebd %>% 
+    auk_species("Wood Thrush") %>% 
+    # southeastern coastal plain bcr
+    auk_bcr(bcr = 27) %>% 
+    # june, use * to get data from any year
+    auk_date(date = c("*-06-01", "*-06-30")) %>% 
+    # restrict to the standard traveling and stationary count protocols
+    auk_protocol(protocol = c("Stationary", "Traveling")) %>% 
+    auk_complete()
+# Double check the filters you have defined
+ebd_filters
+
+# Note that printing the object ebd_filters shows what filters have been set. At this point, we’ve only defined the filters, not applied them to the EBD. The last step is to use auk_filter() to compile the filters into an AWK script and run it to produce two output files: one for the EBD and one for the SED. This step typically takes several hours to run since the files are so large. As a result, it’s wise to wrap this in an if statement, so it’s only run once.
+
+# output files
+data_dir <- "data"
+if (!dir.exists(data_dir)) {
+    dir.create(data_dir)
+}
+f_ebd <- file.path(data_dir, "ebd_woothr_june_bcr27.txt")
+f_sampling <- file.path(data_dir, "ebd_checklists_june_bcr27.txt")
+
+# only run if the files don't already exist
+if (!file.exists(f_ebd)) {
+    auk_filter(ebd_filters, file = f_ebd, file_sampling = f_sampling)
+}
+
+# The previous step left us with two tab separated text files, one for the EBD and one for the SED. Next, we’ll use auk_zerofill() to read these two files into R and combine them together to produce zero-filled, detection/non-detection data (also called presence/absence data). To just read the EBD or SED, but not combine them, use read_ebd() or read_sampling(), respectively.
+
+ebd_zf <- auk_zerofill(f_ebd, f_sampling, collapse = TRUE)
+
+# When any of the read functions from auk are used, two important processing steps occur by default behind the scenes. First, eBird observations can be made at levels below species (e.g. subspecies) or above species (e.g. a bird that was only identified as Duck sp.); however, for most uses we’ll want observations at the species level. auk_rollup() is applied by default when auk_zerofill() is used, and it drops all observations not identifiable to a species and rolls up all observations reported below species to the species level. eBird also allows for group checklists, those shared by multiple users. These checklists lead to duplication or near duplication of records within the dataset and the function auk_unique(), applied by default by auk_zerofill(), addresses this by only keeping one independent copy of each checklist. Finally, by default auk_zerofill() returns a compact representation of the data, consisting of a list of two data frames, one with checklist data and the other with observation data; the use of collapse = TRUE combines these into a single data frame, which will be easier to work with.
+
+# Before continuing, we’ll transform some of the variables to a more useful form for modelling. We convert time to a decimal value between 0 and 24, and we force the distance travelled to 0 for stationary checklists. Notably, eBirders have the option of entering an “X” rather than a count for a species, to indicate that the species was present, but they didn’t keep track of how many individuals were observed. During the modeling stage, we’ll want the observation_count variable stored as an integer and we’ll convert “X” to NA to allow for this.
+
+# function to convert time observation to hours since midnight
+time_to_decimal <- function(x) {
+    x <- hms(x, quiet = TRUE)
+    hour(x) + minute(x) / 60 + second(x) / 3600
+}
+
+# clean up variables
+ebd_zf <- ebd_zf %>% 
+    mutate(
+        # convert X to NA
+        observation_count = if_else(observation_count == "X", 
+                                    NA_character_, observation_count),
+        observation_count = as.integer(observation_count),
+        # effort_distance_km to 0 for non-travelling counts
+        effort_distance_km = if_else(protocol_type != "Traveling", 
+                                     0, effort_distance_km),
+        # convert time to decimal hours since midnight
+        time_observations_started = time_to_decimal(time_observations_started),
+        # split date into year and day of year
+        year = year(observation_date),
+        day_of_year = yday(observation_date)
+    )
+
+# As discussed in the Introduction, variation in effort between checklists makes inference challenging, because it is associated with variation in detectability. When working with semi-structured datasets like eBird, one approach to dealing with this variation is to impose some more consistent structure on the data by filtering observations on the effort variables. This reduces the variation in detectability between checklists. Based on our experience working with these data, we suggest restricting checklists to less than 5 hours long and 5 km in length, and with 10 or fewer observers. Furthermore, we’ll only consider data from the past 10 years (2010-2019).
+
+# As discussed in the Introduction, variation in effort between checklists makes inference challenging, because it is associated with variation in detectability. When working with semi-structured datasets like eBird, one approach to dealing with this variation is to impose some more consistent structure on the data by filtering observations on the effort variables. This reduces the variation in detectability between checklists. Based on our experience working with these data, we suggest restricting checklists to less than 5 hours long and 5 km in length, and with 10 or fewer observers. Furthermore, we’ll only consider data from the past 10 years (2010-2019).
+
+ebd_zf_filtered <- ebd_zf %>% 
+    filter(
+        # effort filters
+        duration_minutes <= 5 * 60,
+        effort_distance_km <= 5,
+        # last 10 years of data
+        year >= 2010,
+        # 10 or fewer observers
+        number_observers <= 10)
+
+# Finally, there are a large number of variables in the EBD that are redundant (e.g. both state names and codes are present) or unnecessary for most modeling exercises (e.g. checklist comments and Important Bird Area codes). These can be removed at this point, keeping only the variables we want for modelling. Then we’ll save the resulting zero-filled observations for use in later chapters.
+
+ebird <- ebd_zf_filtered %>% 
+    select(checklist_id, observer_id, sampling_event_identifier,
+           scientific_name,
+           observation_count, species_observed, 
+           state_code, locality_id, latitude, longitude,
+           protocol_type, all_species_reported,
+           observation_date, year, day_of_year,
+           time_observations_started, 
+           duration_minutes, effort_distance_km,
+           number_observers)
+write_csv(ebird, "data/ebd_woothr_june_bcr27_zf.csv", na = "")
+```
+
+The data processing filtered the dataset to only include the following:
+
+-   Species: Wood Thrush
+
+-   Location: Southeastern Coastal Plain (BCR #27)
+
+    *Note: I'll be filtering this to just include the Florida portion of region 27)*
+
+-   Time: June
+
+-   Years: 2010-2019
+
+-   Protocol: Stationary or Traveling
+
+-   Complete Checklist: Yes
+
+-   Duration: Less than or equal to 5 hours
+
+-   Distance Traveled: Less than or equal to 5 km
+
+-   Number of Observers: Less than or equal to 10
+
+These filters, along with removing many of the columns of unneeded data, significantly reduce the data set to a more manageable size.
+
+Now that we have the data able to be viewed in R we can actually start working with it to get the values for the number of checklists submitted each year and the success rate at spotting a Wood Thrush during bird watching.
+
+```{r eBird Clean Up, include = FALSE}
+# Note: I moved a copy of the prepped eBird dataset from its original folder to my GitHub folder.
+
+## Set the working directory
+setwd("/Users/kimberlyadams/Documents/GitHub/Portfolio/R Statistics/Weather and Wood Thrushes")
+
+eBird <- read.csv("ebd_woothr_june_bcr27_zf.csv")
+
+# Filter for just Florida observations
+library(dplyr)
+eBirdFL <- filter(eBird, state_code == "US-FL")
+
+## Find number of checklists submitted for the month of June in each year.
+JuneChecklistsByYear <- aggregate(eBirdFL$checklist_id, by = list(eBirdFL$year), FUN = length)
+colnames(JuneChecklistsByYear) <- c('Year', 'Checklists')
+
+## Find success rate for seeing a Wood Thrush during June of each year.
+library(tidyverse)
+woodthrushObservations <- gather(eBirdFL, key, val, observation_count) %>%
+   count(year, val) %>%
+   spread(val, n)
+colnames(woodthrushObservations) <- c('Year', 'Absent', 'Yes1', 'Yes2', 'Yes3', 'Yes4')
+
+woodthrushObservationsByYear <- woodthrushObservations %>%
+  rowwise() %>%
+  mutate(Saw = sum(c_across(Yes1:Yes4), na.rm = TRUE))
+
+success <- function(a,b,c) {result <- a / (a + b)}
+woodthrushObservationsByYear$SuccessRate <- success(woodthrushObservationsByYear$Saw, woodthrushObservationsByYear$Absent)
+
+woodthrushObservationsByYear <- select(woodthrushObservationsByYear, Year, SuccessRate)
+
+eBirdDataCleaned <- merge(JuneChecklistsByYear,woodthrushObservationsByYear, by = "Year")
+```
+
+## Weather Data
+
+Two datasets are both come from the Florida Climate Center.
+The Florida Climate Center provides historical weather data and related information to any interested party and collaborates with the National Climatic Data Center.
+The datasets I am using both show the respective weather statistic (precipitation and temperature) for each month and the yearly average ranging from as far back as January 1895 to June 2022.
+
+Temperature: <https://climatecenter.fsu.edu/products-services/data/statewide-averages/temperature>
+
+Precipitation: <https://climatecenter.fsu.edu/products-services/data/statewide-averages/precipitation>
+
+I am going to trim the datasets down to just contain the values for June each year from 2010-2019 to match the eBird data.
+
+```{r Weather Data, include = FALSE}
+library(readxl)
+
+# excel_sheets('/Users/kimberlyadams/Documents/GitHub/DSC520-Statistics-and-R/data/Project/Weather Data.xlsx')
+
+
+##  Precipitation
+
+precip.df = read_excel('/Users/kimberlyadams/Documents/GitHub/Portfolio/R Statistics/Weather and Wood Thrushes/Weather Data.xlsx',sheet = 'StatewidePrecip')
+
+library(dplyr)
+precip.df <- filter(precip.df, Year > 2009)
+precip.df <- filter(precip.df, Year < 2020)
+
+# Trimming columns. I only need the Year and Annual columns.
+precipJune.df = precip.df[, c("Year", "JUN")]
+precipJune.df$JUN <- as.numeric(precipJune.df$JUN)
+precipJune.df[4, 2] = 8.94
+
+# Rename columns as necessary
+names(precipJune.df)[names(precipJune.df) == 'JUN'] <- 'Precip'
+
+
+
+## Temperature
+
+temp.df = read_excel('/Users/kimberlyadams/Documents/GitHub/Portfolio/R Statistics/Weather and Wood Thrushes/Weather Data.xlsx',sheet = 'StatewideTemperature')
+
+temp.df <- filter(temp.df, Year > 2009)
+temp.df <- filter(temp.df, Year < 2020)
+
+
+# Trimming columns. I only need the Year and Annual columns.
+tempJune.df = temp.df[, c("Year", "JUN")]
+tempJune.df$JUN <- as.numeric(tempJune.df$JUN)
+tempJune.df[4, 2] = 81.0
+
+# Rename columns as necessary
+names(tempJune.df)[names(tempJune.df) == 'JUN'] <- 'Temp'
+
+# Merge Precip and Temp data into one table
+weatherDataPT.df <- merge(precipJune.df,tempJune.df, by = "Year", all = TRUE)
+```
+
+## Hurricane Data
+
+Lastly, I am going to try to incorporate hurricane data from the Hurricane Research Division of NOAA (<https://www.aoml.noaa.gov/hrd/hurdat/UShurrs_detailed.html>).
+The data includes Continental United States Hurricane Impacts/Landfalls from 1851-1970 and 1983-2021 and includes information such as the dates, maximum wind speeds, and states affected along with other data.
+
+I will be focusing on only hurricanes that hit anywhere in the state of Florida.
+Although the data set does break Florida down into subsections (Northwest Florida, Southwest Florida, Southeast Florida, and Northeast Florida), I am including all of Florida due to small sample size and due to possible peripheral effects of high winds on surrounding areas.
+However, the inclusion of this data outside of the eBird data region (roughly Northwest and Northeast Florida) could potentially lessen the accuracy of any trends that I discover.
+
+I am also including data for any hurricane within the traget years of 2010-2019.
+Since the eBird and other weather data is only for June, there is also the possibility of error here if a hurricane hits far outside the monthly window.
+
+```{r Hurricane Data, include = FALSE}
+## Hurricanes
+
+# excel_sheets('/Users/kimberlyadams/Documents/GitHub/Portfolio/R Statistics/Weather and Wood Thrushes/Hurricane Impacts.xlsx')
+
+Hurricanes.df = read_excel('/Users/kimberlyadams/Documents/GitHub/Portfolio/R Statistics/Weather and Wood Thrushes/Hurricane Impacts.xlsx',sheet = 'RawData')
+
+# Trimming columns. I only need the columns that indicate the Year, Max Wind Speed, Category, and whether the hurricane hit Florida.
+TrimmedHurricane.df = Hurricanes.df[, c("Date", "MaxWinds_kt", "StatesAffected", "StormNames")]
+
+hurricanesFL.df <- TrimmedHurricane.df[grep("FL", Hurricanes.df$StatesAffected), ]
+
+# Split Date string at /
+library(stringr)
+hurricanesFL.df[c('StartDate', 'StopDate', 'Year')] <- str_split_fixed(hurricanesFL.df$Date, '/', 3)
+
+# Remove extra columns created and now un-needed StatesAffected column
+hurricanesFL.df <- subset(hurricanesFL.df, select = -c(Date, StatesAffected, StartDate, StopDate))
+
+# Extract first 4 characters from new Year column and replace values with new trimmed values
+hurricanesFL.df$Year <- substr(hurricanesFL.df$Year, 1, 4)
+
+library(dplyr)
+hurricanesFL.df <- filter(hurricanesFL.df, Year > 2009)
+hurricanesFL.df <- filter(hurricanesFL.df, Year < 2020)
+
+# Also, Hurricane Irma is listed twice because it changed intensity categories so I will keep the higher category one.
+
+library(dplyr)
+hurricanesFL.df <- filter(hurricanesFL.df, MaxWinds_kt != 100)
+hurricanesFL.df <- subset(hurricanesFL.df, select = -c(StormNames))
+
+hurricanesFL.df$MaxWinds_kt <- as.numeric(hurricanesFL.df$MaxWinds_kt)
+
+HurricanesAnnual.df <- hurricanesFL.df %>% group_by(Year)
+
+## Find number of hurricanes in each year.
+HurricanesAnnualCount.df <- aggregate(HurricanesAnnual.df$MaxWinds_kt, by = list(HurricanesAnnual.df$Year), FUN = length)
+colnames(HurricanesAnnualCount.df) <- c('Year', 'HurrCount')
+HurricanesAnnualCount.df
+
+## Find average wind speed hurricanes in each year.
+HurricanesAnnualWind.df <- aggregate(HurricanesAnnual.df$MaxWinds_kt, by = list(HurricanesAnnual.df$Year), FUN = mean)
+colnames(HurricanesAnnualWind.df) <- c('Year', 'HurrWindSpeed')
+HurricanesAnnualWind.df
+
+# Merge hurricane data into one table
+HurricaneData.df <- merge(HurricanesAnnualCount.df,HurricanesAnnualWind.df, by = "Year", all = TRUE)
+
+# Merge with other weather data
+weatherData.df <- merge(weatherDataPT.df,HurricaneData.df, by = "Year", all = TRUE)
+weatherData.df[is.na(weatherData.df)] <- 0
+```
+
+## Combining All Sources
+
+```{r Final Dataset, echo = FALSE}
+FinalData.df <- merge(weatherData.df,eBirdDataCleaned, by = "Year", all = TRUE)
+
+FinalData.df$Temp <- round(FinalData.df$Temp ,digits = 1) # Round off the Temp column to 1 decimal
+FinalData.df$SuccessRate <- round(FinalData.df$SuccessRate ,digits = 4) # Round off the SuccessRate to 2 decimal
+
+knitr::kable(FinalData.df, "pipe", caption = "Final Data")
+```
+
+# Results
+
+## Basic Trends
+
+Let's first explore the trends that each individual variable expresses over the time period to see if there are any distinct trends we can eyeball:
+
+```{r Basic Trends, echo=FALSE, fig.show="hold", out.width="50%", warning = FALSE, message = FALSE}
+library(ggplot2)
+ggplot(FinalData.df, aes(x = Year, y = Precip)) + geom_point() + ggtitle("June Precipitation") + ylab("Precipitation (in)") + scale_x_continuous(breaks = seq(2010, 2019, by = 2)) + scale_y_continuous(limits = c(0, NA)) + geom_smooth()
+
+ggplot(FinalData.df, aes(x = Year, y = Temp)) + geom_point() + ggtitle("June Temperature") + ylab("Temperature (F)") + scale_x_continuous(breaks = seq(2010, 2019, by = 2)) + geom_smooth()
+
+ggplot(FinalData.df, aes(x = Year, y = HurrCount)) + geom_point() + ggtitle("Number of Annual Hurricanes in Florida") + ylab("Hurricanes") + scale_x_continuous(breaks = seq(2010, 2019, by = 2)) + scale_y_continuous(breaks = seq(0, 2, by = 1)) + scale_y_continuous(limits = c(0, NA)) + geom_smooth()
+
+ggplot(FinalData.df, aes(x = Year, y = HurrWindSpeed)) + geom_point() + ggtitle("Max Wind Speed of Annual Hurricanes in Florida") + ylab("Max Wind Speed (kt)") + scale_x_continuous(breaks = seq(2010, 2019, by = 2)) + scale_y_continuous(breaks = seq(0, 150, by = 25), limits = c(0, NA)) + geom_smooth()
+
+ggplot(FinalData.df, aes(x = Year, y = Checklists)) + geom_point() + ggtitle("Number of Checklists Submitted in June") + ylab("Checklists") + scale_x_continuous(breaks = seq(2010, 2019, by = 2)) + geom_smooth()
+
+ggplot(FinalData.df, aes(x = Year, y = SuccessRate)) + geom_point() + ggtitle("Success Rate of Seeing a Wood Thrush in June") + ylab("Success Rate (Success / Attempts)") + scale_x_continuous(breaks = seq(2010, 2019, by = 2)) + scale_y_continuous(limits = c(0, NA)) + geom_smooth()
+```
+
+Looks like the only clear trend is the increasing number of checklists being submitted as the years go by.
+It shows a possible increasing interest in bird watching as either more people go out and submit their checklists or those who already bird watch go out more often.
+
+The success rate of seeing a Wood Thrush also shows an interesting pattern in that the success rate jumped highly for three years (2011 - 2013) before returning to a lower value and then the rate has been increasing fairly steadily since.
+Note that the success rate is still very low as this species is very secretive and difficult to spot.
+Not sure what might have caused this spike in sightings - perhaps a very cooperative and social Wood Thrush who liked to be seen?
+
+Finally, the temperature seems to stay fairly consistent with only about a 4 degree range of fluctuation.
+There is a slight hint of some cyclical fluctuation, but there is too little data to tell.
+We we need to look at a longer range.
+
+## Interactions
+
+For now, I am going to omit the hurricane data from further study as there are only 3 points out of 10 that actually very from zero.
+With more data, this variable could be interesting, but the incidence rate of hurricanes is too low to do much with it.
+
+I'm just going to pick a few interactions that I think might be interesting to look at.
+Let's look at what happens to the number of checklists submitted and success rate of seeing a Wood Thrush when changing weather criteria.
+Also, lets see how the two weather criteria interact with each other.
+
+```{r Interactions, echo=FALSE, fig.show="hold", out.width="50%", message = FALSE}
+library(ggplot2)
+library(ggpubr)
+
+ggplot(FinalData.df, aes(x = Precip, y = Checklists)) + geom_point() + ggtitle("Precipitation vs Checklists Submitted") + xlab("Precipitation (in)") + ylab("Checklists") + geom_smooth(method=lm, se=FALSE) + stat_regline_equation(aes(label = ..rr.label..))
+
+ggplot(FinalData.df, aes(x = Temp, y = Checklists)) + geom_point() + ggtitle("Temperature vs Checklists Submitted") + xlab("Temperature (F)") + ylab("Checklists") + geom_smooth(method=lm, se=FALSE) + stat_regline_equation(aes(label = ..rr.label..))
+
+ggplot(FinalData.df, aes(x = Precip, y = SuccessRate)) + geom_point() + ggtitle("Precipitation vs Success of Seeing a Wood Thrush") + xlab("Precipitation (in)") + ylab("Success Rate (Success / Attempts)") + geom_smooth(method=lm, se=FALSE) + stat_regline_equation(aes(label = ..rr.label..))
+
+ggplot(FinalData.df, aes(x = Temp, y = SuccessRate)) + geom_point() + ggtitle("Temperature vs Success of Seeing a Wood Thrush") + xlab("Temperature (F)") + ylab("Success Rate (Success / Attempts)") + geom_smooth(method=lm, se=FALSE) + stat_regline_equation(aes(label = ..rr.label..))
+
+ggplot(FinalData.df, aes(x = Checklists, y = SuccessRate)) + geom_point() + ggtitle("Chescklists Submitted vs Success of Seeing a Wood Thrush") + ylab("Success Rate (Success / Attempts)") + xlab("Checklists") + geom_smooth(method=lm, se=FALSE) + stat_regline_equation(aes(label = ..rr.label..))
+
+ggplot(FinalData.df, aes(x = Precip, y = Temp)) + geom_point() + ggtitle("Precipitation vs Temperature") + ylab("Temperature (F)") + xlab("Precipitation (in)") + geom_smooth(method=lm, se=FALSE) + stat_regline_equation(aes(label = ..rr.label..))
+```
+
+Due to the loose fit of the points to the line on the graphs and the subsequent low R^2^ values, none of the interactions are easily modeled by a linear model, except perhaps the interaction between precipitation and temperature.
+As precipitation increases, temperature decreases which makes intuitive sense as the radiant heat from the sun is blocked by rain clouds and there is evaporative cooling effects after the rain finishes.
+
+The next strongest interaction is between the number of checklists submitted and the chance of seeing a Wood Thrush.
+Ironically the more checklists submitted seems to indicate a lower success rate.
+Maybe the secretive Wood Thrushes doesn't like everyone around.
+
+The other interactions are weaker and could be random chance due to residual pull on the model lines.
+Overall precipitation tended to have weakly positive relationships with the checklists and Wood Thrushes, while temperature has weakly negative relationships with the variables.
+
+# Conclusions
+
+Overall, this study did not find any major findings with the exception that there is a strong increase in the number of checklists that are being submitted to eBird.
+Weather does not seem to have a strong impact on the checklist volume nor on the chance of spotting a Wood Thrush.
+Hurricane data was so limited (3 years out of 10) that it ended up being unfeasible to really study.
+
+The results of this study do seem to indicate that bird watchers are dedicated people and will go out birding regardless of weather conditions (though I am sure they probably don't go out when it is actually pouring down rain if they can help it - even the birds hunker down so they don't get as wet).
+From an economic standpoint, this is a great finding as it means that areas with semi-unpleasant or adverse weather conditions are not eliminated from bird watcher traffic so long as the birds are there to be seen.
+This is a major plus for eco-tourism in less hospitable environments.
+
+The downside to the perseverance of bird watchers is that some species like the Wood Thrush might respond negatively to increased traffic.
+In the data, the more checklists that were submitted resulted in fewer sightings of Wood Thrushes.
+As habitat loss crowds birds into smaller and less frequent patches of suitable habitat, increased foot traffic could be putting further stresses on populations that could already be struggling to survive.
+Although some species like the Northern Cardinal, Blue Jay, and House Sparrow are adept at co-existing with humanity in urban environments, many species are less socially flexible and require undisturbed habitat.
+Although further study is needed, the basic findings of this study highlight the need for habitat conservation and respect for wildlife.
+
+# Future Study and Improvement
+
+While I do not suggest building a model for the current data would be helpful as overall trends are very weak, I think that further data exploration could add greater insight into this topic.
+This particular study was very small containing only one month a year in 10 years of weather data (albeit containing data from over 9,000 checklists).
+
+There was so much I wanted to do with this study, but couldn't do to challenges with the full eBird data set.
+In this study I was limited to the single Wood Thrush species, but it would be interesting to compare different species - based on divisions like recognizability, rarity, taxonomic, habitat type, food type, size, etc., to see how their sightings react to the different variables.
+
+I would also be curious to see if the overall number of birdwatchers is increasing or if the same birdwatchers are going out birding more often.
+The eBird dataset has columns that identify who sent in the checklists.
+
+My eBird data set was also limited to the month of June.
+It would be interesting to see if the trends and interactions change if you look at periods such as the March/April spring migrations, September/October fall migration, and winter periods.
+
+Finally I was limited to only a small portion of northern Florida.
+Does the southern part of the state differ?
+Maybe you could narrow it down to a handful of cities and look more closely at both the bird and weather data over time.
