@@ -1,7 +1,8 @@
 # Portfolio
 A collection of various projects to showcase my skills.  Projects here are unlikely to be updated and stand as is.  Feel free to use code from them if you wish.
 
-Basic Python Coding
+## Basic Python Coding
+
 1.	Weather.py
 Simple Python program that retrieves current weather conditions from an API for a city or zip code input by the user. 
 
@@ -9,7 +10,8 @@ Simple Python program that retrieves current weather conditions from an API for 
 Simple Python program that creates a sale receipt for a company purchasing a length of fiber optic cable. 
 
 
-R Statistics
+## R Statistics
+
 3.	Exercise in Exploring Predictors of House Sale Prices Using a Linear Model
 Exploring the relationship between house price and lot size and between price, year built, and lot size. Neither model was very good at explaining the variation with the sale price data. Square footage was a better predictor for house price than the year the house was built.
 
@@ -17,12 +19,14 @@ Exploring the relationship between house price and lot size and between price, y
 This study looks at how different weather aspects such as precipitation, temperature, and hurricanes affect bird observations both in terms of the number of checklists that are being submitted by birders to eBird and the success rate of observing a Wood Thrush in the northern part of the state of Florida. 
 
 
-Visuals
+## Visuals
+
 5.	Airline Safety Review
 This project looks at the statistics and other numbers regarding the safety of airline travel and highlights the use of visualizations in presentations. 
 
 
-Data Mining
+## Data Mining
+
 6.	Birdwatching During the Pandemic
 Review project looking at whether the coronavirus pandemic impacted birdwatching popularity through several different sources including Google search trends, financial data, and participation numbers in citizen science.
 
@@ -30,7 +34,8 @@ Review project looking at whether the coronavirus pandemic impacted birdwatching
 Exercise in combining data from different sources and working with SQL datasets.  General exploration into car crash data, public safety spending, unemployment rate, population, and public transportation usage.
 
 
-Models
+## Models
+
 8.	The (Possible) Hidden Cost of Smoking on Insurance
 This project attempts to estimate an insurance company's year-end medical charges from the data supplied when patrons sign up.  A second model attempts to estimate a possible hidden cost from patrons lying about their smoker status during sign-up. The second model is a possible additional lens to look at the results from the first model. 
 
