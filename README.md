@@ -50,3 +50,9 @@ Group predictive analysis project trying to predict future almond crop yield bas
 
 12.	Book Recommendation System
 This project looks to create a recommender system in which a reader inputs the title of a book they liked, and the system will respond with recommendations for their next book to read.  The project explores and evaluates two methods for the recommendation: rating-based and content-based.
+
+13.	Bird Photo Identification
+This project aimed to create a model that could identify bird species shown in a photo.  The classification model created was around 78 percent accurate.
+
+14.	Predicting the Monetary Value of Ecotourism
+This project looked into characteristics of tourism in Tanzania and attempted to create a model that could predict potential income for local communities due to the tourism.  Although it was able to provide some potential marketing insights, the models created at best underestimated the potential tour costs and would require further improvement.
